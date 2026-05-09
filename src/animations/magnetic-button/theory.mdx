@@ -1,0 +1,91 @@
+## The Technique
+
+A magnetic button leans toward the cursor as it approaches, then eases back to
+rest when the cursor withdraws. The interaction creates a tactile sense of
+gravity within a flat interface — the button feels physically responsive, as
+though it occupies the same space as the cursor.
+
+## The Mechanism
+
+Three values do all the work:
+
+1. The **distance** between the cursor and the button's centre.
+2. A **pull radius** — the threshold within which attraction begins.
+3. A **pull strength** between 0 and 1, the fraction of the cursor offset that
+   the button covers.
+
+When the cursor is inside the radius, we translate the button by
+`offset × strength`. Outside it, the button returns to origin.
+
+```tsx
+const dx = e.clientX - centerX;
+const dy = e.clientY - centerY;
+const dist = Math.hypot(dx, dy);
+
+if (dist < PULL_RADIUS) {
+  x.set(dx * PULL_STRENGTH);
+  y.set(dy * PULL_STRENGTH);
+} else {
+  x.set(0);
+  y.set(0);
+}
+```
+
+That's the whole position calculation. The interesting part is what happens
+between the input position and the actual rendered transform.
+
+## Why The Spring Matters
+
+If you bound the button's position directly to the cursor, the effect feels
+hard and synthetic — every micro-jitter of the mouse becomes a micro-jitter of
+the button. That's the truth of the data, but it's a lie about how an
+attractive force should feel.
+
+A spring fixes this. It treats the cursor offset as a **target** rather than a
+position, and animates the button toward that target with momentum:
+
+```tsx
+const x = useMotionValue(0);
+const y = useMotionValue(0);
+const sx = useSpring(x, { stiffness: 220, damping: 22, mass: 0.6 });
+const sy = useSpring(y, { stiffness: 220, damping: 22, mass: 0.6 });
+```
+
+The spring smooths the input on the way in (small movements get filtered) and
+provides a natural decelerating curve on the way out. Critically, when the
+cursor leaves the radius and we set the target back to `0`, the spring
+**eases** the button home rather than snapping it.
+
+## Tuning Notes
+
+The three spring parameters trade off against each other in ways that aren't
+obvious until you feel them:
+
+- **Stiffness** governs how aggressively the button chases the target. Above
+  ~300, it starts to feel jittery. Below ~150, it lags.
+- **Damping** suppresses oscillation. Below `2 × √stiffness`, the button
+  overshoots — for a button this is wrong (it should never bounce past its
+  rest position). The values above are slightly under-damped, which gives a
+  faint "settling" without crossing into bounce.
+- **Mass** scales the perceived weight. A heavier button (mass > 1) feels
+  reluctant; a lighter one feels twitchy. `0.6` reads as a confident object
+  with momentum.
+
+## Caveats
+
+The pull radius is a fixed pixel value, which means the same button feels
+different at different button sizes and viewport scales. If you ship this
+across many sizes, derive the radius from the button's bounding rect instead.
+
+Touch devices fire pointer events on tap rather than continuously, so the
+effect collapses into a click-only translation on mobile. That's usually
+acceptable — the magnetic metaphor depends on cursor proximity, which doesn't
+exist on touch. If you want to hide the effect entirely on coarse pointers,
+guard the handlers with `(matchMedia("(hover: hover) and (pointer: fine)")).matches`.
+
+## Inspiration
+
+Cursor-attracted UI elements are a Codrops staple — see the long line of
+demos by Lucas Bebber and Tympanus on cursor magnetism. The specific spring
+configuration above borrows from Apple's HIG guidance on object weight,
+adapted for the web.
